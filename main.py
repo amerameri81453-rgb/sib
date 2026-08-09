@@ -21,7 +21,7 @@ CHANNEL_ID = -1004316990533
 ADMIN_IDS = [7803165903, 8010044260]
 
 # ============== تنظیمات OpenRouter ==============
-OPENROUTER_API_KEY = "sk-or-v1-777...578"  # ← کلید کاملت رو اینجا بذار
+OPENROUTER_API_KEY = "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"
 
 # ============== راه‌اندازی ==============
 logging.basicConfig(level=logging.INFO)
@@ -119,16 +119,16 @@ async def get_ai_response(question):
             }
             
             payload = {
-                "model": "meta-llama/llama-3.3-70b-instruct:free",  # مدل قوی و رایگان
+                "model": "meta-llama/llama-3.3-70b-instruct:free",
                 "messages": [
                     {
                         "role": "system", 
                         "content": """تو یک دستیار هوشمند و حرفه‌ای برای کانال سیب‌شاپ هستی.
                         به سوال کاربر به فارسی پاسخ بده.
                         پاسخ باید مفید، دقیق، دوستانه و کامل باشه.
-                        اگر درباره محصولات اپل سوال شد، اطلاعات دقیق بدی.
-                        اگر قیمت خواست، قیمت‌های تقریبی رو بگی.
-                        اگر گارانتی خواست، گارانتی ۱۸ ماهه رو توضیح بدی."""
+                        درباره محصولات اپل اطلاعات دقیق بده.
+                        قیمت‌ها رو به تومان بگو.
+                        گارانتی ۱۸ ماهه رو توضیح بده."""
                     },
                     {"role": "user", "content": question}
                 ],
@@ -141,6 +141,8 @@ async def get_ai_response(question):
                 if resp.status == 200:
                     data = await resp.json()
                     return data["choices"][0]["message"]["content"]
+                elif resp.status == 401:
+                    return "❌ خطا: کلید API معتبر نیست. لطفاً کلید جدید از openrouter.ai/keys بگیر."
                 elif resp.status == 429:
                     return "⚠️ محدودیت درخواست روزانه پر شده. لطفاً فردا دوباره تلاش کن."
                 else:

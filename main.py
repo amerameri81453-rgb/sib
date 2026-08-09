@@ -12,7 +12,6 @@ from apscheduler.triggers.date import DateTrigger
 import aiohttp
 import pytz
 import jdatetime
-import google.generativeai as genai
 
 # ============== تنظیمات ==============
 API_ID = 29811798
@@ -21,10 +20,9 @@ BOT_TOKEN = "8874696899:AAE4xqezJFuTJjwLuWmsME09RN4lCUQOfCw"
 CHANNEL_ID = -1004316990533
 ADMIN_IDS = [7803165903, 8010044260]
 
-# ============== تنظیمات هوش مصنوعی Gemini ==============
-GEMINI_API_KEY = "AQ.Ab8RN6KlGHD461tiz4JeVc_3fUabxd0x_qo_WjNWTji-zPaMjA"
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+# ============== تنظیمات Hugging Face ==============
+HF_TOKEN = "hf_xxxxxxx"  # ← کلیدت رو اینجا بذار
+HF_MODEL = "mistralai/Mistral-7B-Instruct-v0.3"  # مدل رایگان و قوی
 
 # ============== راه‌اندازی ==============
 logging.basicConfig(level=logging.INFO)
@@ -107,6 +105,57 @@ def convert_jalali_to_gregorian(year, month, day, hour, minute):
 def is_admin(user_id):
     return user_id in ADMIN_IDS
 
+# ============== هوش مصنوعی Hugging Face ==============
+async def get_huggingface_response(question):
+    """ارسال سوال به Hugging Face و دریافت پاسخ"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            # API Inference برای مدل‌های رایگان
+            url = f"https://api-inference.huggingface.co/models/{HF_MODEL}"
+            
+            headers = {
+                "Authorization": f"Bearer {HF_TOKEN}",
+                "Content-Type": "application/json"
+            }
+            
+            # ساخت پرامپت مخصوص سیب‌شاپ
+            prompt = f"""<s>[INST] 
+            تو یک دستیار هوشمند و حرفه‌ای برای کانال سیب‌شاپ هستی.
+            به سوال کاربر به فارسی پاسخ بده.
+            پاسخ باید مفید، دقیق، دوستانه و کامل باشه.
+            
+            سوال کاربر: {question}
+            
+            پاسخ: [/INST]"""
+            
+            payload = {
+                "inputs": prompt,
+                "parameters": {
+                    "max_new_tokens": 500,
+                    "temperature": 0.7,
+                    "return_full_text": False
+                }
+            }
+            
+            async with session.post(url, headers=headers, json=payload, timeout=30) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if isinstance(data, list) and len(data) > 0:
+                        return data[0].get("generated_text", "خطا در تولید پاسخ")
+                    elif isinstance(data, dict):
+                        return data.get("generated_text", "خطا در تولید پاسخ")
+                    return "خطا در دریافت پاسخ"
+                elif resp.status == 503:
+                    # مدل در حال بارگذاری است
+                    return "⏳ مدل در حال آماده‌سازی است. لطفاً ۳۰ ثانیه بعد دوباره تلاش کن."
+                else:
+                    error_text = await resp.text()
+                    return f"❌ خطا: {error_text}"
+    except asyncio.TimeoutError:
+        return "⏳ زمان پاسخ‌دهی به پایان رسید. لطفاً دوباره تلاش کن."
+    except Exception as e:
+        return f"❌ خطا در ارتباط با هوش مصنوعی: {str(e)}"
+
 # ============== دستور استارت ==============
 @app.on_message(filters.command("start"))
 async def start_command(client, message: Message):
@@ -116,7 +165,7 @@ async def start_command(client, message: Message):
     
     await message.reply_text(
         "🍎 **به ربات هوشمند سیب‌شاپ خوش اومدی!**\n\n"
-        "من یک هوش مصنوعی پیشرفته با **Google Gemini** هستم!\n"
+        "من یک هوش مصنوعی پیشرفته با **Hugging Face** هستم!\n"
         "مخصوص کانال سیب‌شاپ طراحی شدم.\n\n"
         "✨ **قابلیت‌های من:**\n"
         "• 📝 ثبت پست با هر نوع رسانه\n"
@@ -244,28 +293,19 @@ async def handle_text_messages(client, message: Message):
         del user_data[user_id]
         return
     
-    # مرحله 4: هوش مصنوعی Gemini
+    # مرحله 4: هوش مصنوعی Hugging Face
     if user_id in user_data and user_data[user_id].get("step") == "waiting_ai_question":
         question = message.text
         
-        loading_msg = await message.reply_text("🧠 در حال فکر کردن با Gemini... لطفاً چند ثانیه صبر کن.")
+        loading_msg = await message.reply_text("🧠 در حال فکر کردن با Hugging Face... لطفاً چند ثانیه صبر کن.")
         
         try:
-            prompt = f"""تو یک دستیار هوشمند و حرفه‌ای برای **کانال سیب‌شاپ** هستی.
-            به سوال کاربر به فارسی پاسخ بده.
-            پاسخ باید مفید، دقیق، دوستانه و کامل باشه.
-            
-            سوال کاربر: {question}
-            
-            پاسخ:"""
-            
-            response = model.generate_content(prompt)
-            ai_response = response.text
+            ai_response = await get_huggingface_response(question)
             
             await loading_msg.delete()
             
             await message.reply_text(
-                f"🧠 **پاسخ هوش مصنوعی سیب‌شاپ (Gemini):**\n\n"
+                f"🧠 **پاسخ هوش مصنوعی سیب‌شاپ (Hugging Face):**\n\n"
                 f"{ai_response}\n\n"
                 f"❓ سوال دیگه‌ای داری؟ بپرس!",
                 reply_markup=InlineKeyboardMarkup([
@@ -276,7 +316,7 @@ async def handle_text_messages(client, message: Message):
         except Exception as e:
             await loading_msg.delete()
             await message.reply_text(
-                f"❌ خطا در ارتباط با هوش مصنوعی Gemini: {str(e)}\n"
+                f"❌ خطا در ارتباط با هوش مصنوعی: {str(e)}\n"
                 f"لطفاً دوباره تلاش کن.",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("🔙 بازگشت", callback_data="back")]
@@ -553,7 +593,7 @@ async def confirm_delete(client, callback: CallbackQuery):
         reply_markup=manage_posts_menu()
     )
 
-# ============== هوش مصنوعی Gemini ==============
+# ============== هوش مصنوعی Hugging Face ==============
 @app.on_callback_query(filters.regex("ai_chat"))
 async def ai_chat(client, callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
@@ -561,8 +601,8 @@ async def ai_chat(client, callback: CallbackQuery):
         return
     
     await callback.message.edit_text(
-        "🧠 **هوش مصنوعی سیب‌شاپ (Gemini)**\n\n"
-        "من یک هوش مصنوعی واقعی هستم که با **Google Gemini** تقویت شدم!\n"
+        "🧠 **هوش مصنوعی سیب‌شاپ (Hugging Face)**\n\n"
+        "من یک هوش مصنوعی واقعی با مدل **Mistral 7B** از Hugging Face هستم!\n"
         "میتونی هر سوالی بپرسی:\n"
         "• درباره محصولات اپل 🍎\n"
         "• مقایسه و راهنمای خرید 📱\n"
@@ -677,8 +717,8 @@ async def help_command(client, callback: CallbackQuery):
 • **ویرایش پست:** تغییر محتوای پست‌های در انتظار
 • **حذف پست:** حذف پست‌های در انتظار
 
-**🧠 هوش مصنوعی Gemini:**
-هر سوالی داری بپرس! من با Google Gemini بهت پاسخ میدم.
+**🧠 هوش مصنوعی Hugging Face:**
+هر سوالی داری بپرس! من با مدل Mistral 7B بهت پاسخ میدم.
 
 **💰 استعلام قیمت:**
 اسم محصول رو بفرست تا قیمت از دیجی‌کالا و ترب بگیرم
@@ -710,7 +750,7 @@ async def back(client, callback: CallbackQuery):
 
 # ============== ران کردن ربات ==============
 if __name__ == "__main__":
-    print("🍎 ربات هوشمند سیب‌شاپ با Gemini در حال اجرا...")
+    print("🍎 ربات هوشمند سیب‌شاپ با Hugging Face در حال اجرا...")
     print(f"👥 فقط کاربران با آیدی {ADMIN_IDS} دسترسی دارند.")
     scheduler.start()
     app.run()

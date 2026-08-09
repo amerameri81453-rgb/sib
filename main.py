@@ -20,7 +20,7 @@ BOT_TOKEN = "8874696899:AAE4xqezJFuTJjwLuWmsME09RN4lCUQOfCw"
 CHANNEL_ID = -1004316990533
 ADMIN_IDS = [7803165903, 8010044260]
 
-# ============== تنظیمات OpenRouter با Phi-3.5 (رایگان) ==============
+# ============== تنظیمات OpenRouter با Mistral 7B ==============
 OPENROUTER_API_KEY = "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"
 
 # ============== راه‌اندازی ==============
@@ -104,9 +104,8 @@ def convert_jalali_to_gregorian(year, month, day, hour, minute):
 def is_admin(user_id):
     return user_id in ADMIN_IDS
 
-# ============== هوش مصنوعی OpenRouter با Phi-3.5 (رایگان) ==============
+# ============== هوش مصنوعی OpenRouter با Mistral 7B ==============
 async def get_ai_response(question):
-    """ارسال سوال به OpenRouter با مدل Phi-3.5 و دریافت پاسخ"""
     try:
         async with aiohttp.ClientSession() as session:
             url = "https://openrouter.ai/api/v1/chat/completions"
@@ -119,7 +118,7 @@ async def get_ai_response(question):
             }
             
             payload = {
-                "model": "microsoft/phi-3.5-mini-128k-instruct:free",
+                "model": "mistralai/mistral-7b-instruct:free",
                 "messages": [
                     {
                         "role": "system", 
@@ -162,7 +161,7 @@ async def start_command(client, message: Message):
     
     await message.reply_text(
         "🍎 **به ربات هوشمند سیب‌شاپ خوش اومدی!**\n\n"
-        "من یک هوش مصنوعی پیشرفته با **Phi-3.5** از Microsoft هستم!\n"
+        "من یک هوش مصنوعی پیشرفته با **Mistral 7B** هستم!\n"
         "مخصوص کانال سیب‌شاپ طراحی شدم.\n\n"
         "✨ **قابلیت‌های من:**\n"
         "• 📝 ثبت پست با هر نوع رسانه\n"
@@ -290,11 +289,11 @@ async def handle_text_messages(client, message: Message):
         del user_data[user_id]
         return
     
-    # مرحله 4: هوش مصنوعی Phi-3.5
+    # مرحله 4: هوش مصنوعی Mistral 7B
     if user_id in user_data and user_data[user_id].get("step") == "waiting_ai_question":
         question = message.text
         
-        loading_msg = await message.reply_text("🧠 در حال فکر کردن با Phi-3.5... لطفاً چند ثانیه صبر کن.")
+        loading_msg = await message.reply_text("🧠 در حال فکر کردن با Mistral 7B... لطفاً چند ثانیه صبر کن.")
         
         try:
             ai_response = await get_ai_response(question)
@@ -302,7 +301,7 @@ async def handle_text_messages(client, message: Message):
             await loading_msg.delete()
             
             await message.reply_text(
-                f"🧠 **پاسخ هوش مصنوعی سیب‌شاپ (Phi-3.5):**\n\n"
+                f"🧠 **پاسخ هوش مصنوعی سیب‌شاپ (Mistral 7B):**\n\n"
                 f"{ai_response}\n\n"
                 f"❓ سوال دیگه‌ای داری؟ بپرس!",
                 reply_markup=InlineKeyboardMarkup([
@@ -590,7 +589,7 @@ async def confirm_delete(client, callback: CallbackQuery):
         reply_markup=manage_posts_menu()
     )
 
-# ============== هوش مصنوعی Phi-3.5 ==============
+# ============== هوش مصنوعی Mistral 7B ==============
 @app.on_callback_query(filters.regex("ai_chat"))
 async def ai_chat(client, callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
@@ -598,8 +597,8 @@ async def ai_chat(client, callback: CallbackQuery):
         return
     
     await callback.message.edit_text(
-        "🧠 **هوش مصنوعی سیب‌شاپ (Phi-3.5)**\n\n"
-        "من یک هوش مصنوعی واقعی با مدل **Phi-3.5 Mini** از Microsoft هستم!\n"
+        "🧠 **هوش مصنوعی سیب‌شاپ (Mistral 7B)**\n\n"
+        "من یک هوش مصنوعی واقعی با مدل **Mistral 7B** هستم!\n"
         "میتونی هر سوالی بپرسی:\n"
         "• درباره محصولات اپل 🍎\n"
         "• مقایسه و راهنمای خرید 📱\n"
@@ -714,8 +713,8 @@ async def help_command(client, callback: CallbackQuery):
 • **ویرایش پست:** تغییر محتوای پست‌های در انتظار
 • **حذف پست:** حذف پست‌های در انتظار
 
-**🧠 هوش مصنوعی Phi-3.5:**
-هر سوالی داری بپرس! من با مدل Phi-3.5 Mini از Microsoft بهت پاسخ میدم.
+**🧠 هوش مصنوعی Mistral 7B:**
+هر سوالی داری بپرس! من با مدل Mistral 7B بهت پاسخ میدم.
 
 **💰 استعلام قیمت:**
 اسم محصول رو بفرست تا قیمت از دیجی‌کالا و ترب بگیرم
@@ -747,7 +746,7 @@ async def back(client, callback: CallbackQuery):
 
 # ============== ران کردن ربات ==============
 if __name__ == "__main__":
-    print("🍎 ربات هوشمند سیب‌شاپ با Phi-3.5 در حال اجرا...")
+    print("🍎 ربات هوشمند سیب‌شاپ با Mistral 7B در حال اجرا...")
     print(f"👥 فقط کاربران با آیدی {ADMIN_IDS} دسترسی دارند.")
     scheduler.start()
     app.run()

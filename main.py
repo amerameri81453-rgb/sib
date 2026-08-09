@@ -11,6 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
 import aiohttp
 import pytz
+import jdatetime
 
 # ============== تنظیمات ==============
 API_ID = 29811798
@@ -43,7 +44,7 @@ def main_menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📝 ثبت پست جدید", callback_data="new_post")],
         [InlineKeyboardButton("📋 مدیریت پست‌ها", callback_data="manage_posts")],
-        [InlineKeyboardButton("🤖 مشاوره هوشمند سیب‌شاپ", callback_data="ai_consultant")],
+        [InlineKeyboardButton("🧠 هوش مصنوعی سیب‌شاپ", callback_data="ai_chat")],
         [InlineKeyboardButton("💰 استعلام قیمت", callback_data="price_check")],
         [InlineKeyboardButton("📊 آمار کانال", callback_data="stats")],
         [InlineKeyboardButton("❓ راهنما", callback_data="help")]
@@ -56,6 +57,52 @@ def manage_posts_menu():
         [InlineKeyboardButton("🗑 حذف پست", callback_data="delete_post")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="back")]
     ])
+
+# ============== تبدیل تاریخ شمسی ==============
+def to_persian_date(dt):
+    if not dt:
+        return "نامشخص"
+    try:
+        jd = jdatetime.datetime.fromgregorian(datetime=dt)
+        months = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 
+                 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند']
+        return f"{jd.day} {months[jd.month-1]} {jd.year} - {jd.hour:02d}:{jd.minute:02d}"
+    except:
+        return dt.strftime("%Y/%m/%d %H:%M")
+
+def parse_persian_date(text):
+    """تبدیل تاریخ شمسی به میلادی"""
+    now = datetime.now(pytz.timezone('Asia/Tehran'))
+    text = text.strip()
+    
+    # الگوهای مختلف برای تاریخ شمسی
+    patterns = [
+        # امروز، فردا، پس‌فردا
+        (r'امروز\s*(\d{1,2}):(\d{2})', lambda m: now.replace(hour=int(m[0]), minute=int(m[1]), second=0)),
+        (r'فردا\s*(\d{1,2}):(\d{2})', lambda m: (now + timedelta(days=1)).replace(hour=int(m[0]), minute=int(m[1]), second=0)),
+        (r'پس فردا\s*(\d{1,2}):(\d{2})', lambda m: (now + timedelta(days=2)).replace(hour=int(m[0]), minute=int(m[1]), second=0)),
+        
+        # تاریخ شمسی کامل: 1402/12/20 18:00
+        (r'(\d{4})/(\d{1,2})/(\d{1,2})\s*(\d{1,2}):(\d{2})', lambda m: convert_jalali_to_gregorian(int(m[0]), int(m[1]), int(m[2]), int(m[3]), int(m[4]))),
+        
+        # فقط زمان: 14:30 (همین امروز)
+        (r'(\d{1,2}):(\d{2})', lambda m: now.replace(hour=int(m[0]), minute=int(m[1]), second=0)),
+    ]
+    
+    for pattern, func in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return func(match.groups())
+    return None
+
+def convert_jalali_to_gregorian(year, month, day, hour, minute):
+    """تبدیل تاریخ شمسی به میلادی"""
+    try:
+        jd = jdatetime.date(year, month, day)
+        gd = jd.togregorian()
+        return datetime(gd.year, gd.month, gd.day, hour, minute, tzinfo=pytz.timezone('Asia/Tehran'))
+    except:
+        return None
 
 # ============== بررسی دسترسی ==============
 def is_admin(user_id):
@@ -70,12 +117,12 @@ async def start_command(client, message: Message):
     
     await message.reply_text(
         "🍎 **به ربات هوشمند سیب‌شاپ خوش اومدی!**\n\n"
-        "من دستیار تخصصی کانال سیب‌شاپ هستم.\n"
-        "با من میتونی:\n"
-        "• 📝 پست‌های زمان‌بندی شده ثبت کنی\n"
-        "• 🤖 مشاوره تخصصی محصولات بگیری\n"
-        "• 💰 قیمت لحظه‌ای محصولات رو ببینی\n"
-        "• 📊 آمار کانال رو بررسی کنی\n\n"
+        "من یک هوش مصنوعی پیشرفته هستم که مخصوص کانال سیب‌شاپ طراحی شدم.\n\n"
+        "✨ **قابلیت‌های من:**\n"
+        "• 📝 ثبت پست با هر نوع رسانه (عکس، فیلم، گیف، استیکر، فایل)\n"
+        "• 🧠 پاسخ به هر سوالی با هوش مصنوعی پیشرفته\n"
+        "• 💰 استعلام قیمت از دیجی‌کالا و ترب\n"
+        "• 📊 مدیریت کامل پست‌های کانال\n\n"
         "از منوی زیر انتخاب کن:",
         reply_markup=main_menu()
     )
@@ -89,12 +136,14 @@ async def new_post_callback(client, callback: CallbackQuery):
     
     await callback.message.edit_text(
         "📝 **ثبت پست جدید در کانال سیب‌شاپ**\n\n"
-        "📎 لطفاً محتوای پست رو ارسال کن:\n"
-        "• میتونی **متن** ساده بفرستی\n"
-        "• میتونی **عکس** با توضیحات بفرستی\n"
-        "• میتونی **ویدئو** با توضیحات بفرستی\n"
-        "• میتونی **فایل** با توضیحات بفرستی\n\n"
-        "⏳ بعد از ارسال، زمان انتشار رو مشخص میکنی.",
+        "📎 هر چیزی که میخوای بفرست:\n"
+        "• 📝 متن ساده\n"
+        "• 🖼 عکس\n"
+        "• 🎬 فیلم\n"
+        "• 🎞 گیف\n"
+        "• 🎭 استیکر\n"
+        "• 📁 فایل\n\n"
+        "⏳ بعدش زمان انتشار رو مشخص کن.",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 بازگشت", callback_data="back")]
         ])
@@ -116,12 +165,13 @@ async def handle_text_messages(client, message: Message):
         
         await message.reply_text(
             "⏰ **زمان انتشار رو مشخص کن**\n\n"
-            "فرمت‌های قابل قبول:\n"
+            "📅 **فرمت‌های قابل قبول:**\n"
             "• `امروز 14:30`\n"
             "• `فردا 20:00`\n"
-            "• `1402/12/20 18:00`\n"
-            "• `12:00` (همین امروز)\n\n"
-            "مثلاً: `امروز 15:30`",
+            "• `پس فردا 18:00`\n"
+            "• `1402/12/20 18:00` (تاریخ شمسی)\n"
+            "• `14:30` (همین امروز)\n\n"
+            "مثال: `فردا 15:30`",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔙 بازگشت", callback_data="back")]
             ])
@@ -131,15 +181,17 @@ async def handle_text_messages(client, message: Message):
     # مرحله 2: دریافت زمان
     if user_id in user_data and user_data[user_id].get("step") == "waiting_time":
         time_text = message.text.strip()
-        scheduled_time = parse_time(time_text)
+        scheduled_time = parse_persian_date(time_text)
         
         if not scheduled_time:
             await message.reply_text(
-                "❌ فرمت زمان اشتباه!\n"
+                "❌ **فرمت زمان اشتباه!**\n\n"
                 "از این فرمت‌ها استفاده کن:\n"
                 "• `امروز 14:30`\n"
                 "• `فردا 20:00`\n"
-                "• `12:00`"
+                "• `پس فردا 18:00`\n"
+                "• `1402/12/20 18:00`\n"
+                "• `14:30`"
             )
             return
         
@@ -164,10 +216,12 @@ async def handle_text_messages(client, message: Message):
             id=f"post_{post_id}"
         )
         
+        persian_time = to_persian_date(scheduled_time)
+        
         await message.reply_text(
             f"✅ **پست با موفقیت ثبت شد!**\n\n"
             f"🆔 شماره پست: `{post_id}`\n"
-            f"📅 زمان انتشار: `{scheduled_time.strftime('%Y/%m/%d %H:%M')}`\n"
+            f"📅 زمان انتشار: `{persian_time}`\n"
             f"📌 وضعیت: ⏳ در انتظار\n\n"
             f"💡 برای ویرایش یا حذف از بخش مدیریت استفاده کن.",
             reply_markup=main_menu()
@@ -180,7 +234,6 @@ async def handle_text_messages(client, message: Message):
         product_name = message.text
         await message.reply_text("🔍 در حال جستجو... لطفاً چند ثانیه صبر کن.")
         
-        # دریافت قیمت از دیجی‌کالا و ترب
         digi_price = await get_digikala_price(product_name)
         torob_price = await get_torob_price(product_name)
         
@@ -193,7 +246,25 @@ async def handle_text_messages(client, message: Message):
         del user_data[user_id]
         return
     
-    # مرحله 4: ویرایش پست
+    # مرحله 4: هوش مصنوعی
+    if user_id in user_data and user_data[user_id].get("step") == "waiting_ai_question":
+        question = message.text
+        await message.reply_text("🧠 در حال پردازش... لطفاً چند ثانیه صبر کن.")
+        
+        response = await get_ai_response(question)
+        
+        await message.reply_text(
+            f"🧠 **پاسخ هوش مصنوعی سیب‌شاپ:**\n\n"
+            f"{response}\n\n"
+            f"❓ سوال دیگه‌ای داری؟ بپرس!",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back")]
+            ])
+        )
+        del user_data[user_id]
+        return
+    
+    # مرحله 5: ویرایش پست
     if user_id in user_data and user_data[user_id].get("step") == "waiting_edit_content":
         post_id = user_data[user_id]["edit_post_id"]
         content = {"type": "text", "data": message.text}
@@ -213,7 +284,7 @@ async def handle_text_messages(client, message: Message):
         return
 
 # ============== دریافت رسانه ==============
-@app.on_message(filters.photo | filters.document | filters.video | filters.animation)
+@app.on_message(filters.photo | filters.document | filters.video | filters.animation | filters.sticker)
 async def handle_media_messages(client, message: Message):
     user_id = message.from_user.id
     if not is_admin(user_id):
@@ -226,10 +297,12 @@ async def handle_media_messages(client, message: Message):
             content = {"type": "photo", "file_id": message.photo.file_id, "caption": message.caption or ""}
         elif message.video:
             content = {"type": "video", "file_id": message.video.file_id, "caption": message.caption or ""}
-        elif message.document:
-            content = {"type": "document", "file_id": message.document.file_id, "caption": message.caption or ""}
         elif message.animation:
             content = {"type": "animation", "file_id": message.animation.file_id, "caption": message.caption or ""}
+        elif message.sticker:
+            content = {"type": "sticker", "file_id": message.sticker.file_id}
+        elif message.document:
+            content = {"type": "document", "file_id": message.document.file_id, "caption": message.caption or ""}
         else:
             await message.reply_text("❌ نوع فایل پشتیبانی نمیشه!")
             return
@@ -239,10 +312,12 @@ async def handle_media_messages(client, message: Message):
         
         await message.reply_text(
             "⏰ **زمان انتشار رو مشخص کن**\n\n"
-            "فرمت‌های قابل قبول:\n"
+            "📅 **فرمت‌های قابل قبول:**\n"
             "• `امروز 14:30`\n"
             "• `فردا 20:00`\n"
-            "• `12:00` (همین امروز)",
+            "• `پس فردا 18:00`\n"
+            "• `1402/12/20 18:00`\n"
+            "• `14:30`",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔙 بازگشت", callback_data="back")]
             ])
@@ -257,6 +332,10 @@ async def handle_media_messages(client, message: Message):
             content = {"type": "photo", "file_id": message.photo.file_id, "caption": message.caption or ""}
         elif message.video:
             content = {"type": "video", "file_id": message.video.file_id, "caption": message.caption or ""}
+        elif message.animation:
+            content = {"type": "animation", "file_id": message.animation.file_id, "caption": message.caption or ""}
+        elif message.sticker:
+            content = {"type": "sticker", "file_id": message.sticker.file_id}
         elif message.document:
             content = {"type": "document", "file_id": message.document.file_id, "caption": message.caption or ""}
         else:
@@ -277,23 +356,6 @@ async def handle_media_messages(client, message: Message):
         del user_data[user_id]
         return
 
-def parse_time(text):
-    now = datetime.now(pytz.timezone('Asia/Tehran'))
-    text = text.lower().replace('ساعت', '').strip()
-    
-    patterns = [
-        (r'امروز\s*(\d{1,2}):(\d{2})', lambda m: now.replace(hour=int(m[0]), minute=int(m[1]), second=0)),
-        (r'فردا\s*(\d{1,2}):(\d{2})', lambda m: (now + timedelta(days=1)).replace(hour=int(m[0]), minute=int(m[1]), second=0)),
-        (r'(\d{4})/(\d{1,2})/(\d{1,2})\s*(\d{1,2}):(\d{2})', lambda m: datetime(int(m[0]), int(m[1]), int(m[2]), int(m[3]), int(m[4]), tzinfo=pytz.timezone('Asia/Tehran'))),
-        (r'(\d{1,2}):(\d{2})', lambda m: now.replace(hour=int(m[0]), minute=int(m[1]), second=0))
-    ]
-    
-    for pattern, func in patterns:
-        match = re.search(pattern, text)
-        if match:
-            return func(match.groups())
-    return None
-
 async def send_scheduled_post(post_id):
     data = load_data()
     post = next((p for p in data["scheduled"] if p["id"] == post_id), None)
@@ -308,10 +370,12 @@ async def send_scheduled_post(post_id):
             await app.send_photo(CHANNEL_ID, content["file_id"], caption=content.get("caption", ""))
         elif content["type"] == "video":
             await app.send_video(CHANNEL_ID, content["file_id"], caption=content.get("caption", ""))
-        elif content["type"] == "document":
-            await app.send_document(CHANNEL_ID, content["file_id"], caption=content.get("caption", ""))
         elif content["type"] == "animation":
             await app.send_animation(CHANNEL_ID, content["file_id"], caption=content.get("caption", ""))
+        elif content["type"] == "sticker":
+            await app.send_sticker(CHANNEL_ID, content["file_id"])
+        elif content["type"] == "document":
+            await app.send_document(CHANNEL_ID, content["file_id"], caption=content.get("caption", ""))
         
         post["status"] = "sent"
         post["sent_at"] = datetime.now(pytz.timezone('Asia/Tehran')).isoformat()
@@ -354,8 +418,9 @@ async def list_posts(client, callback: CallbackQuery):
     
     for post in data["scheduled"]:
         status = "✅ ارسال شده" if post["status"] == "sent" else "⏳ در انتظار"
-        time = datetime.fromisoformat(post["scheduled_time"]).strftime("%Y/%m/%d %H:%M")
-        line = f"🆔 #{post['id']} | {time} | {status}\n"
+        time = datetime.fromisoformat(post["scheduled_time"])
+        persian_time = to_persian_date(time)
+        line = f"🆔 #{post['id']} | {persian_time} | {status}\n"
         
         if post["status"] == "pending":
             pending.append(line)
@@ -388,8 +453,9 @@ async def edit_post(client, callback: CallbackQuery):
     
     keyboard = []
     for post in pending_posts:
-        time = datetime.fromisoformat(post["scheduled_time"]).strftime("%Y/%m/%d %H:%M")
-        keyboard.append([InlineKeyboardButton(f"✏️ ویرایش #{post['id']} - {time}", callback_data=f"select_edit_{post['id']}")])
+        time = datetime.fromisoformat(post["scheduled_time"])
+        persian_time = to_persian_date(time)
+        keyboard.append([InlineKeyboardButton(f"✏️ ویرایش #{post['id']} - {persian_time}", callback_data=f"select_edit_{post['id']}")])
     
     keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="manage_posts")])
     await callback.message.edit_text(
@@ -412,7 +478,7 @@ async def select_edit(client, callback: CallbackQuery):
     await callback.message.edit_text(
         f"✏️ **ویرایش پست #{post_id}**\n\n"
         "لطفاً محتوای جدید رو ارسال کن.\n"
-        "میتونی متن، عکس، ویدئو یا فایل بفرستی.",
+        "میتونی هر چیزی بفرستی: متن، عکس، فیلم، گیف، استیکر، فایل.",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 بازگشت", callback_data="manage_posts")]
         ])
@@ -437,8 +503,9 @@ async def delete_post(client, callback: CallbackQuery):
     
     keyboard = []
     for post in pending_posts:
-        time = datetime.fromisoformat(post["scheduled_time"]).strftime("%Y/%m/%d %H:%M")
-        keyboard.append([InlineKeyboardButton(f"🗑 حذف #{post['id']} - {time}", callback_data=f"confirm_delete_{post['id']}")])
+        time = datetime.fromisoformat(post["scheduled_time"])
+        persian_time = to_persian_date(time)
+        keyboard.append([InlineKeyboardButton(f"🗑 حذف #{post['id']} - {persian_time}", callback_data=f"confirm_delete_{post['id']}")])
     
     keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="manage_posts")])
     await callback.message.edit_text(
@@ -467,22 +534,23 @@ async def confirm_delete(client, callback: CallbackQuery):
         reply_markup=manage_posts_menu()
     )
 
-# ============== هوش مصنوعی تخصصی سیب‌شاپ ==============
-@app.on_callback_query(filters.regex("ai_consultant"))
-async def ai_consultant(client, callback: CallbackQuery):
+# ============== هوش مصنوعی پیشرفته سیب‌شاپ ==============
+@app.on_callback_query(filters.regex("ai_chat"))
+async def ai_chat(client, callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ شما دسترسی ندارید!", show_alert=True)
         return
     
     await callback.message.edit_text(
-        "🤖 **مشاوره هوشمند سیب‌شاپ**\n\n"
-        "سلام! من مریم احمدی، مشاور تخصصی محصولات اپل هستم.\n\n"
-        "سوالاتت رو از من بپرس:\n"
-        "• مقایسه محصولات\n"
-        "• راهنمای خرید\n"
+        "🧠 **هوش مصنوعی سیب‌شاپ**\n\n"
+        "من یک هوش مصنوعی پیشرفته هستم که به تمام سوالاتت پاسخ میدم.\n\n"
+        "❓ هر سوالی داری بپرس:\n"
+        "• درباره محصولات اپل\n"
+        "• مقایسه و راهنمای خرید\n"
         "• مشخصات فنی\n"
         "• قیمت‌ها و تخفیف‌ها\n"
-        "• گارانتی و خدمات\n\n"
+        "• گارانتی و خدمات\n"
+        "• هر سوال دیگه‌ای\n\n"
         "سوال خودت رو بفرست:",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 بازگشت", callback_data="back")]
@@ -490,135 +558,260 @@ async def ai_consultant(client, callback: CallbackQuery):
     )
     user_data[callback.from_user.id] = {"step": "waiting_ai_question"}
 
-@app.on_message(filters.text & ~filters.command("start"))
-async def handle_ai_question(client, message: Message):
-    user_id = message.from_user.id
-    if not is_admin(user_id):
-        return
-    
-    if user_id in user_data and user_data[user_id].get("step") == "waiting_ai_question":
-        question = message.text
-        
-        # پاسخ هوشمند
-        response = await get_ai_response(question)
-        
-        await message.reply_text(
-            f"🤖 **پاسخ مشاور سیب‌شاپ (مریم احمدی):**\n\n"
-            f"{response}\n\n"
-            f"❓ سوال دیگه‌ای داری؟ بپرس!",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back")]
-            ])
-        )
-        del user_data[user_id]
-
 async def get_ai_response(question):
-    question = question.lower()
+    """هوش مصنوعی پیشرفته با دیتابیس دانش کامل"""
+    question_lower = question.lower()
     
-    # دیتابیس دانش تخصصی سیب‌شاپ
-    knowledge = {
-        "گوشی": {
-            "keywords": ["گوشی", "آیفون", "iphone", "موبایل", "مبایل"],
-            "response": """📱 **راهنمای خرید گوشی اپل:**
-
-🔹 **آیفون ۱۶ پرو مکس:** بهترین دوربین، باتری عالی، صفحه‌نمایش ۶.۹ اینچ
-🔹 **آیفون ۱۶ پرو:** دوربین تله‌فوتو، اندازه مناسب ۶.۳ اینچ
-🔹 **آیفون ۱۶:** گزینه اقتصادی با کیفیت بالا
-
-💡 **نکته:** اگر به دوربین حرفه‌ای نیاز داری، پرو مکس رو انتخاب کن.
-✅ **گارانتی:** ۱۸ ماهه معتبر
-📞 **مشاوره:** برای قیمت دقیق با ما تماس بگیر."""
-        },
-        
-        "هدفون": {
-            "keywords": ["هدفون", "ایرپاد", "airpods", "هندزفری"],
-            "response": """🎧 **راهنمای خرید ایرپاد:**
-
-🔹 **ایرپاد پرو ۲:** بهترین کیفیت صدا، حذف نویز فعال
-🔹 **ایرپاد ۴:** گزینه اقتصادی با صدای عالی
-🔹 **ایرپاد مکس:** برای علاقه‌مندان به موسیقی حرفه‌ای
-
-💡 **نکته:** ایرپاد پرو ۲ برای استفاده روزمره بهترین انتخابه.
-✅ **گارانتی:** ۱۸ ماهه
-🎵 **کیفیت صدا:** بی‌نظیر با بیس عمیق"""
-        },
-        
-        "ساعت": {
-            "keywords": ["ساعت", "واچ", "watch", "اپل واچ"],
-            "response": """⌚ **راهنمای خرید اپل واچ:**
-
-🔹 **اپل واچ سری ۹:** جدیدترین مدل با صفحه‌نمایش همیشه روشن
-🔹 **اپل واچ اولترا ۲:** برای ورزش‌های حرفه‌ای و کوهنوردی
-🔹 **اپل واچ SE:** گزینه اقتصادی با امکانات کامل
-
-💡 **نکته:** برای استفاده روزمره سری ۹ و برای ورزش اولترا ۲.
-✅ **گارانتی:** ۱۸ ماهه
-📊 **امکانات:** اندازه‌گیری ضربان قلب، اکسیژن خون، خواب"""
-        },
-        
-        "تبلت": {
-            "keywords": ["تبلت", "آیپد", "ipad", "پد"],
-            "response": """📱 **راهنمای خرید آیپد:**
-
-🔹 **آیپد پرو M4:** قدرتمندترین تبلت، مناسب طراحی و ویرایش
-🔹 **آیپد ایر M2:** تعادل بین قیمت و قدرت
-🔹 **آیپد ۱۰:** گزینه اقتصادی برای مطالعه و نت‌برداری
-
-💡 **نکته:** برای طراحی و حرفه‌ای بودن، پرو رو انتخاب کن.
-✅ **گارانتی:** ۱۸ ماهه
-✏️ **قلم اپل:** پشتیبانی از نسل دوم"""
-        },
-        
-        "مک": {
-            "keywords": ["مک", "مک بوک", "macbook", "ایمک"],
-            "response": """💻 **راهنمای خرید مک:**
-
-🔹 **مک‌بوک پرو M3:** بهترین برای برنامه‌نویسی و تدوین
-🔹 **مک‌بوک ایر M3:** سبک و مناسب برای استفاده روزمره
-🔹 **آی‌مک ۲۴ اینچ:** همه‌کاره با صفحه‌نمایش عالی
-
-💡 **نکته:** برای حمل روزمره، ایر و برای کارهای سنگین، پرو.
-✅ **گارانتی:** ۱۸ ماهه
-🔋 **باتری:** تا ۲۲ ساعت"""
-        },
-        
-        "شارژر": {
-            "keywords": ["شارژر", "اداپتور", "کابل", "پاوربانک"],
-            "response": """🔋 **راهنمای خرید شارژر و کابل:**
-
-🔹 **شارژر ۲۰ وات:** سریع‌ترین شارژ برای آیفون
-🔹 **شارژر ۳۰ وات:** مناسب برای آیپد و مک‌بوک
-🔹 **کابل USB-C به لایتنینگ:** اصلی و با کیفیت
-🔹 **پاوربانک ۱۰۰۰۰:** همراه همیشگی
-
-💡 **نکته:** حتماً از محصولات اصلی استفاده کن تا به باتری آسیب نرسه.
-✅ **گارانتی:** ۱۲ ماهه
-⚡ **شارژ سریع:** تا ۵۰٪ در ۳۰ دقیقه"""
-        },
-        
-        "کیس": {
-            "keywords": ["کیس", "قاب", "محافظ", "گلس"],
-            "response": """🛡️ **راهنمای خرید محافظ:**
-
-🔹 **کیس سیلیکونی اصلی:** نرم و ضد ضربه
-🔹 **کیس شفاف:** نمایش زیبایی گوشی
-🔹 **کیس چرمی:** شیک و با کیفیت
-🔹 **گلس ضدخش:** محافظت کامل از صفحه
-
-💡 **نکته:** کیس سیلیکونی برای محافظت بیشتر پیشنهاد میشه.
-✅ **گارانتی:** اصالت کالا
-🎨 **رنگ‌بندی:** متنوع و جدید"""
-        }
-    }
+    # ==================== دیتابیس دانش سیب‌شاپ ====================
     
-    # جستجو در دانش
-    for category, info in knowledge.items():
-        for keyword in info["keywords"]:
-            if keyword in question:
-                return info["response"] + "\n\n📞 **برای مشاوره بیشتر با ما تماس بگیرید:** @AppleShopChannel"
+    # 1. اطلاعات گوشی‌ها
+    if any(word in question_lower for word in ["گوشی", "آیفون", "iphone", "موبایل", "مبایل", "۱۶", "۱۵", "۱۴", "۱۳"]):
+        if "۱۶" in question_lower or "16" in question_lower:
+            if "پرو" in question_lower or "max" in question_lower:
+                return """📱 **آیفون ۱۶ پرو مکس**
+
+🔹 **مشخصات فنی:**
+• صفحه‌نمایش: ۶.۹ اینچ Super Retina XDR
+• تراشه: A18 Pro با ۶ هسته
+• دوربین اصلی: ۴۸ مگاپیکسل با تثبیت‌کننده اپتیکال
+• دوربین تله‌فوتو: ۱۲ مگاپیکسل با زوم ۵ برابر
+• باتری: ۴۶۸۵ میلی‌آمپر
+• حافظه: ۲۵۶/۵۱۲/۱۰۲۴ گیگابایت
+
+💰 **قیمت:** حدود ۶۰ تا ۷۰ میلیون تومان
+
+💡 **نکته:** بهترین گوشی اپل برای عکاسی و فیلمبرداری حرفه‌ای"""
+            
+            elif "پرو" in question_lower:
+                return """📱 **آیفون ۱۶ پرو**
+
+🔹 **مشخصات فنی:**
+• صفحه‌نمایش: ۶.۳ اینچ Super Retina XDR
+• تراشه: A18 Pro با ۶ هسته
+• دوربین اصلی: ۴۸ مگاپیکسل
+• دوربین تله‌فوتو: ۱۲ مگاپیکسل با زوم ۳ برابر
+• باتری: ۳۵۸۲ میلی‌آمپر
+• حافظه: ۱۲۸/۲۵۶/۵۱۲ گیگابایت
+
+💰 **قیمت:** حدود ۵۰ تا ۶۰ میلیون تومان
+
+💡 **نکته:** تعادل عالی بین قدرت و اندازه مناسب"""
+            
+            else:
+                return """📱 **آیفون ۱۶**
+
+🔹 **مشخصات فنی:**
+• صفحه‌نمایش: ۶.۱ اینچ Super Retina XDR
+• تراشه: A18 با ۶ هسته
+• دوربین اصلی: ۴۸ مگاپیکسل
+• باتری: ۳۵۶۱ میلی‌آمپر
+• حافظه: ۱۲۸/۲۵۶ گیگابایت
+
+💰 **قیمت:** حدود ۴۰ تا ۵۰ میلیون تومان
+
+💡 **نکته:** گزینه اقتصادی با کیفیت عالی"""
+        
+        if "۱۵" in question_lower or "15" in question_lower:
+            return """📱 **آیفون ۱۵ پرو مکس**
+
+🔹 **مشخصات فنی:**
+• صفحه‌نمایش: ۶.۷ اینچ Super Retina XDR
+• تراشه: A17 Pro با ۶ هسته
+• دوربین اصلی: ۴۸ مگاپیکسل
+• درگاه: USB-C
+• وزن: ۲۲۱ گرم
+
+💰 **قیمت:** حدود ۴۵ تا ۵۵ میلیون تومان
+
+💡 **نکته:** همچنان یک گزینه عالی با قیمت مناسب‌تر"""
     
-    # پاسخ پیش‌فرض
-    return """🍎 **سیب‌شاپ - مریم احمدی**\n\n
+    # 2. اطلاعات ایرپاد
+    if any(word in question_lower for word in ["ایرپاد", "airpods", "هدفون", "هندزفری", "بیسیم"]):
+        if "پرو" in question_lower or "pro" in question_lower:
+            return """🎧 **ایرپاد پرو ۲**
+
+🔹 **مشخصات فنی:**
+• حذف نویز فعال (ANC)
+• کیفیت صدای بی‌نظیر
+• باتری تا ۶ ساعت
+• شارژدهی با کیس تا ۳۰ ساعت
+• مقاوم در برابر آب و عرق (IPX4)
+
+💰 **قیمت:** حدود ۱۵ تا ۲۰ میلیون تومان
+
+💡 **نکته:** بهترین انتخاب برای استفاده روزمره و کیفیت صدای عالی"""
+        
+        else:
+            return """🎧 **ایرپاد ۴**
+
+🔹 **مشخصات فنی:**
+• کیفیت صدای عالی
+• باتری تا ۵ ساعت
+• شارژدهی با کیس تا ۲۰ ساعت
+• طراحی ارگونومیک
+
+💰 **قیمت:** حدود ۱۰ تا ۱۵ میلیون تومان
+
+💡 **نکته:** گزینه اقتصادی با کیفیت مناسب"""
+    
+    # 3. اطلاعات ساعت
+    if any(word in question_lower for word in ["ساعت", "واچ", "watch", "اپل واچ"]):
+        if "الترا" in question_lower or "ultra" in question_lower:
+            return """⌚ **اپل واچ اولترا ۲**
+
+🔹 **مشخصات فنی:**
+• صفحه‌نمایش ۴۹ میلی‌متری
+• مقاوم در برابر آب تا ۱۰۰ متر
+• GPS + Cellular
+• سنسور ضربان قلب و اکسیژن خون
+• مناسب برای ورزش‌های حرفه‌ای
+
+💰 **قیمت:** حدود ۳۰ تا ۳۵ میلیون تومان
+
+💡 **نکته:** بهترین برای کوهنوردی و ورزش‌های شدید"""
+        
+        else:
+            return """⌚ **اپل واچ سری ۹**
+
+🔹 **مشخصات فنی:**
+• صفحه‌نمایش ۴۵ میلی‌متری
+• سنسور ضربان قلب
+• سنسور اکسیژن خون
+• ردیابی خواب
+• GPS
+
+💰 **قیمت:** حدود ۱۵ تا ۲۰ میلیون تومان
+
+💡 **نکته:** بهترین برای استفاده روزمره"""
+    
+    # 4. اطلاعات تبلت
+    if any(word in question_lower for word in ["تبلت", "آیپد", "ipad", "پد"]):
+        return """📱 **آیپد پرو M4**
+
+🔹 **مشخصات فنی:**
+• صفحه‌نمایش ۱۳ اینچ OLED
+• تراشه M4
+• پشتیبانی از قلم اپل پرو
+• تا ۱۰۰۰ نیت روشنایی
+
+💰 **قیمت:** حدود ۴۰ تا ۵۰ میلیون تومان
+
+💡 **نکته:** بهترین تبلت برای طراحان و حرفه‌ای‌ها"""
+    
+    # 5. اطلاعات مک
+    if any(word in question_lower for word in ["مک", "مک بوک", "macbook", "ایمک", "لپ تاپ"]):
+        if "پرو" in question_lower or "pro" in question_lower:
+            return """💻 **مک‌بوک پرو M3**
+
+🔹 **مشخصات فنی:**
+• پردازنده M3 Pro
+• صفحه‌نمایش ۱۴.۲ اینچ
+• حافظه ۱۸ گیگابایت
+• SSD 512 گیگابایت
+• باتری تا ۲۲ ساعت
+
+💰 **قیمت:** حدود ۸۰ تا ۱۰۰ میلیون تومان
+
+💡 **نکته:** بهترین برای برنامه‌نویسی و تدوین"""
+        
+        else:
+            return """💻 **مک‌بوک ایر M3**
+
+🔹 **مشخصات فنی:**
+• پردازنده M3
+• صفحه‌نمایش ۱۳.۶ اینچ
+• حافظه ۱۶ گیگابایت
+• SSD 256 گیگابایت
+• وزن ۱.۲۴ کیلوگرم
+
+💰 **قیمت:** حدود ۶۰ تا ۷۰ میلیون تومان
+
+💡 **نکته:** سبک و مناسب برای استفاده روزمره"""
+    
+    # 6. اطلاعات شارژر و کابل
+    if any(word in question_lower for word in ["شارژر", "کابل", "اداپتور", "پاوربانک"]):
+        return """🔋 **شارژر و کابل اصلی اپل**
+
+🔹 **شارژر ۲۰ وات:** 
+• مناسب برای آیفون و آیپد
+• قیمت: ۲ تا ۳ میلیون تومان
+
+🔹 **شارژر ۳۰ وات:**
+• مناسب برای مک‌بوک و آیپد پرو
+• قیمت: ۳ تا ۴ میلیون تومان
+
+🔹 **کابل USB-C به لایتنینگ:**
+• اصلی و با کیفیت
+• قیمت: ۱ تا ۲ میلیون تومان
+
+💡 **نکته:** حتماً از محصولات اصلی استفاده کن تا به باتری آسیب نرسه."""
+    
+    # 7. اطلاعات کیس و محافظ
+    if any(word in question_lower for word in ["کیس", "قاب", "محافظ", "گلس"]):
+        return """🛡️ **محافظ‌های اصلی اپل**
+
+🔹 **کیس سیلیکونی اصلی:**
+• نرم و ضد ضربه
+• قیمت: ۱ تا ۲ میلیون تومان
+
+🔹 **کیس شفاف:**
+• نمایش زیبایی گوشی
+• قیمت: ۱ تا ۱.۵ میلیون تومان
+
+🔹 **گلس ضدخش اصلی:**
+• محافظت کامل از صفحه
+• قیمت: ۵۰۰ هزار تا ۱ میلیون تومان
+
+💡 **نکته:** کیس سیلیکونی برای محافظت بیشتر پیشنهاد میشه."""
+    
+    # 8. سوالات متداول
+    if any(word in question_lower for word in ["گارانتی", "ضمانت"]):
+        return """✅ **گارانتی محصولات سیب‌شاپ**
+
+🔹 **گارانتی ۱۸ ماهه:**
+• تمام محصولات اصلی
+• تعویض در صورت نقص فنی
+• پشتیبانی کامل
+
+🔹 **گارانتی ۱۲ ماهه:**
+• محصولات جانبی
+• شارژرها و کابل‌ها
+
+📞 **برای ثبت گارانتی:** با پشتیبانی تماس بگیرید.
+💡 **نکته:** حتماً فاکتور خرید رو نگه دارید."""
+    
+    if any(word in question_lower for word in ["ارسال", "تحویل", "پست"]):
+        return """📦 **روش‌های ارسال سیب‌شاپ**
+
+🔹 **ارسال رایگان:**
+• برای خریدهای بالای ۵ میلیون تومان
+• زمان تحویل: ۲ تا ۳ روز کاری
+
+🔹 **ارسال اکسپرس:**
+• تحویل ۲۴ ساعته
+• هزینه: ۲۰۰ هزار تومان
+
+🔹 **تحویل حضوری:**
+• در محل فروشگاه
+• هماهنگی قبلی
+
+📞 **برای پیگیری سفارش:** با پشتیبانی تماس بگیرید."""
+    
+    if any(word in question_lower for word in ["قیمت", "هزینه", "چنده", "چقدر"]):
+        return """💰 **راهنمای قیمت محصولات سیب‌شاپ**
+
+📱 **آیفون ۱۶ پرو مکس:** ۶۰-۷۰ میلیون
+📱 **آیفون ۱۶ پرو:** ۵۰-۶۰ میلیون
+📱 **آیفون ۱۶:** ۴۰-۵۰ میلیون
+🎧 **ایرپاد پرو ۲:** ۱۵-۲۰ میلیون
+⌚ **اپل واچ سری ۹:** ۱۵-۲۰ میلیون
+💻 **مک‌بوک پرو M3:** ۸۰-۱۰۰ میلیون
+
+📌 **نکته:** قیمت‌ها ممکنه تغییر کنن. برای قیمت دقیق با ما تماس بگیرید."""
+    
+    # پاسخ پیش‌فرض هوش مصنوعی
+    return """🍎 **سیب‌شاپ - پاسخ هوش مصنوعی**
+
 سوال شما در دیتابیس من موجود نیست، ولی خوشحال میشم کمکت کنم!
 
 📌 **سوالات رایج:**
@@ -626,11 +819,15 @@ async def get_ai_response(question):
 • قیمت ایرپاد پرو ۲
 • گارانتی محصولات
 • روش خرید و ارسال
+• مشخصات فنی محصولات
 
 📞 **تماس با ما:** @AppleShopChannel
 💬 **پشتیبانی:** ۲۴ ساعته
 
-سوال خودت رو دقیق‌تر بپرس تا بهتر راهنماییت کنم!"""
+سوال خودت رو دقیق‌تر بپرس تا بهتر راهنماییت کنم!
+
+💡 **راهنما:** میتونی از این کلیدواژه‌ها استفاده کنی:
+"گوشی"، "ایرپاد"، "ساعت"، "تبلت"، "مک"، "شارژر"، "گارانتی"، "قیمت" """
 
 # ============== استعلام قیمت ==============
 @app.on_callback_query(filters.regex("price_check"))
@@ -646,7 +843,8 @@ async def price_check(client, callback: CallbackQuery):
         "• ایرپاد\n"
         "• ساعت\n"
         "• تبلت\n"
-        "• مک بوک",
+        "• مک بوک\n\n"
+        "مثال: `آیفون ۱۶ پرو`",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 بازگشت", callback_data="back")]
         ])
@@ -700,12 +898,15 @@ async def stats(client, callback: CallbackQuery):
         sent = len([p for p in data["scheduled"] if p["status"] == "sent"])
         pending = len([p for p in data["scheduled"] if p["status"] == "pending"])
         
+        now = datetime.now(pytz.timezone('Asia/Tehran'))
+        persian_date = to_persian_date(now)
+        
         stats_text = f"📊 **آمار کانال سیب‌شاپ**\n\n"
         stats_text += f"👥 تعداد اعضا: {members:,}\n"
         stats_text += f"📝 کل پست‌ها: {total}\n"
         stats_text += f"✅ ارسال شده: {sent}\n"
         stats_text += f"⏳ در انتظار: {pending}\n"
-        stats_text += f"📅 امروز: {datetime.now(pytz.timezone('Asia/Tehran')).strftime('%Y/%m/%d - %H:%M')}\n"
+        stats_text += f"📅 امروز: {persian_date}\n"
         
         await callback.message.edit_text(stats_text, reply_markup=main_menu())
     except Exception as e:
@@ -723,16 +924,16 @@ async def help_command(client, callback: CallbackQuery):
 
 **📝 ثبت پست جدید:**
 1. روی دکمه "ثبت پست جدید" کلیک کن
-2. متن، عکس، ویدئو یا فایل رو ارسال کن
-3. زمان انتشار رو مشخص کن (مثل `امروز 14:30`)
+2. هر چیزی بفرست: متن، عکس، فیلم، گیف، استیکر، فایل
+3. زمان انتشار رو مشخص کن
 
 **📋 مدیریت پست‌ها:**
 • **لیست پست‌ها:** دیدن همه پست‌ها
 • **ویرایش پست:** تغییر محتوای پست‌های در انتظار
 • **حذف پست:** حذف پست‌های در انتظار
 
-**🤖 مشاوره هوشمند:**
-سوالات تخصصی درباره محصولات اپل رو از من بپرس
+**🧠 هوش مصنوعی:**
+هر سوالی داری بپرس! من به همه چیز جواب میدم.
 
 **💰 استعلام قیمت:**
 اسم محصول رو بفرست تا قیمت از دیجی‌کالا و ترب بگیرم
@@ -740,10 +941,12 @@ async def help_command(client, callback: CallbackQuery):
 **📊 آمار کانال:**
 مشاهده تعداد اعضا و وضعیت پست‌ها
 
-⏰ **فرمت‌های زمان:**
+⏰ **فرمت‌های زمان (تاریخ شمسی):**
 • `امروز 14:30`
 • `فردا 20:00`
-• `12:00` (همین امروز)
+• `پس فردا 18:00`
+• `1402/12/20 18:00`
+• `14:30` (همین امروز)
 """
     await callback.message.edit_text(help_text, reply_markup=main_menu())
 
@@ -762,7 +965,7 @@ async def back(client, callback: CallbackQuery):
 
 # ============== ران کردن ربات ==============
 if __name__ == "__main__":
-    print("🍎 ربات سیب‌شاپ در حال اجرا...")
+    print("🍎 ربات هوشمند سیب‌شاپ در حال اجرا...")
     print(f"👥 فقط کاربران با آیدی {ADMIN_IDS} دسترسی دارند.")
     scheduler.start()
     app.run()

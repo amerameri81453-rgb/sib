@@ -84,8 +84,96 @@ async def new_post_callback(client, callback: CallbackQuery):
     )
     user_data[callback.from_user.id] = {"step": "waiting_post_content"}
 
-@app.on_message(filters.text | filters.photo | filters.document | filters.video)
-async def handle_post_content(client, message: Message):
+# ============== دریافت محتوای پست ==============
+@app.on_message(filters.text & ~filters.command("start"))
+async def handle_text_messages(client, message: Message):
+    user_id = message.from_user.id
+    if not is_admin(user_id):
+        return
+    
+    # اگر کاربر در مرحله ثبت پست هست
+    if user_id in user_data and user_data[user_id].get("step") == "waiting_post_content":
+        content = {"type": "text", "data": message.text}
+        user_data[user_id]["content"] = content
+        user_data[user_id]["step"] = "waiting_time"
+        
+        await message.reply_text(
+            "⏰ **زمان انتشار رو مشخص کن**\n\n"
+            "فرمت‌های قابل قبول:\n"
+            "• `امروز 14:30`\n"
+            "• `فردا 20:00`\n"
+            "• `1402/12/20 18:00`\n"
+            "• `12:00` (همین امروز)\n\n"
+            "مثلاً: `امروز 15:30`",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 بازگشت", callback_data="back")]
+            ])
+        )
+        return
+    
+    # اگر کاربر در مرحله زمان هست
+    if user_id in user_data and user_data[user_id].get("step") == "waiting_time":
+        time_text = message.text.strip()
+        scheduled_time = parse_time(time_text)
+        
+        if not scheduled_time:
+            await message.reply_text("❌ فرمت زمان اشتباه! دوباره امتحان کن.")
+            return
+        
+        # ذخیره در دیتابیس
+        data = load_data()
+        post_id = len(data["scheduled"]) + 1
+        post_data = {
+            "id": post_id,
+            "content": user_data[user_id]["content"],
+            "scheduled_time": scheduled_time.isoformat(),
+            "status": "pending"
+        }
+        data["scheduled"].append(post_data)
+        save_data(data)
+        
+        # برنامه‌ریزی برای ارسال
+        scheduler.add_job(
+            send_scheduled_post,
+            DateTrigger(run_date=scheduled_time),
+            args=[post_id],
+            id=f"post_{post_id}"
+        )
+        
+        await message.reply_text(
+            f"✅ پست با موفقیت ثبت شد!\n"
+            f"📅 زمان انتشار: `{scheduled_time.strftime('%Y/%m/%d %H:%M')}`\n"
+            f"🆔 شماره پست: `{post_id}`",
+            reply_markup=main_menu()
+        )
+        del user_data[user_id]
+        return
+    
+    # اگر کاربر در مرحله استعلام قیمت هست
+    if user_id in user_data and user_data[user_id].get("step") == "waiting_product_name":
+        product_name = message.text
+        await message.reply_text("🔍 در حال جستجو... لطفاً چند ثانیه صبر کن.")
+        
+        # دریافت قیمت از دیجی‌کالا و ترب
+        digi_price = await get_digikala_price(product_name)
+        torob_price = await get_torob_price(product_name)
+        
+        # هوش مصنوعی رایگان
+        ai_response = await get_ai_response(product_name)
+        
+        response = f"🤖 **نتیجه استعلام قیمت برای:**\n`{product_name}`\n\n"
+        response += f"🛒 **دیجی‌کالا:** {digi_price}\n"
+        response += f"🛍 **ترب:** {torob_price}\n\n"
+        response += f"💡 **توضیحات:**\n{ai_response}\n\n"
+        response += "📌 قیمت‌ها ممکن است تغییر کنند، لطفاً دقت کنید."
+        
+        await message.reply_text(response, reply_markup=main_menu())
+        del user_data[user_id]
+        return
+
+# ============== دریافت عکس و فایل ==============
+@app.on_message(filters.photo | filters.document | filters.video)
+async def handle_media_messages(client, message: Message):
     user_id = message.from_user.id
     if not is_admin(user_id):
         return
@@ -93,14 +181,15 @@ async def handle_post_content(client, message: Message):
     if user_id not in user_data or user_data[user_id].get("step") != "waiting_post_content":
         return
     
-    # ذخیره محتوای پست
-    content = {"type": "text", "data": message.text} if message.text else {"type": "media"}
+    # ذخیره محتوای مدیا
     if message.photo:
         content = {"type": "photo", "file_id": message.photo.file_id, "caption": message.caption}
     elif message.document:
         content = {"type": "document", "file_id": message.document.file_id, "caption": message.caption}
     elif message.video:
         content = {"type": "video", "file_id": message.video.file_id, "caption": message.caption}
+    else:
+        return
     
     user_data[user_id]["content"] = content
     user_data[user_id]["step"] = "waiting_time"
@@ -117,50 +206,6 @@ async def handle_post_content(client, message: Message):
             [InlineKeyboardButton("🔙 بازگشت", callback_data="back")]
         ])
     )
-
-@app.on_message(filters.text & ~filters.command)
-async def handle_time_input(client, message: Message):
-    user_id = message.from_user.id
-    if not is_admin(user_id):
-        return
-    
-    if user_id not in user_data or user_data[user_id].get("step") != "waiting_time":
-        return
-    
-    time_text = message.text.strip()
-    scheduled_time = parse_time(time_text)
-    
-    if not scheduled_time:
-        await message.reply_text("❌ فرمت زمان اشتباه! دوباره امتحان کن.")
-        return
-    
-    # ذخیره در دیتابیس
-    data = load_data()
-    post_id = len(data["scheduled"]) + 1
-    post_data = {
-        "id": post_id,
-        "content": user_data[user_id]["content"],
-        "scheduled_time": scheduled_time.isoformat(),
-        "status": "pending"
-    }
-    data["scheduled"].append(post_data)
-    save_data(data)
-    
-    # برنامه‌ریزی برای ارسال
-    scheduler.add_job(
-        send_scheduled_post,
-        DateTrigger(run_date=scheduled_time),
-        args=[post_id],
-        id=f"post_{post_id}"
-    )
-    
-    await message.reply_text(
-        f"✅ پست با موفقیت ثبت شد!\n"
-        f"📅 زمان انتشار: `{scheduled_time.strftime('%Y/%m/%d %H:%M')}`\n"
-        f"🆔 شماره پست: `{post_id}`",
-        reply_markup=main_menu()
-    )
-    del user_data[user_id]
 
 def parse_time(text):
     now = datetime.now(pytz.timezone('Asia/Tehran'))
@@ -273,7 +318,7 @@ async def confirm_delete(client, callback: CallbackQuery):
         reply_markup=main_menu()
     )
 
-# ============== استعلام قیمت (دیجی‌کالا + ترب) ==============
+# ============== استعلام قیمت ==============
 @app.on_callback_query(filters.regex("price_check"))
 async def price_check(client, callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
@@ -289,38 +334,9 @@ async def price_check(client, callback: CallbackQuery):
     )
     user_data[callback.from_user.id] = {"step": "waiting_product_name"}
 
-@app.on_message(filters.text & ~filters.command)
-async def handle_product_name(client, message: Message):
-    user_id = message.from_user.id
-    if not is_admin(user_id):
-        return
-    
-    if user_id not in user_data or user_data[user_id].get("step") != "waiting_product_name":
-        return
-    
-    product_name = message.text
-    await message.reply_text("🔍 در حال جستجو... لطفاً چند ثانیه صبر کن.")
-    
-    # دریافت قیمت از دیجی‌کالا و ترب
-    digi_price = await get_digikala_price(product_name)
-    torob_price = await get_torob_price(product_name)
-    
-    # هوش مصنوعی رایگان (با استفاده از API ساده)
-    ai_response = await get_ai_response(product_name)
-    
-    response = f"🤖 **نتیجه استعلام قیمت برای:**\n`{product_name}`\n\n"
-    response += f"🛒 **دیجی‌کالا:** {digi_price}\n"
-    response += f"🛍 **ترب:** {torob_price}\n\n"
-    response += f"💡 **توضیحات:**\n{ai_response}\n\n"
-    response += "📌 قیمت‌ها ممکن است تغییر کنند، لطفاً دقت کنید."
-    
-    await message.reply_text(response, reply_markup=main_menu())
-    del user_data[user_id]
-
 async def get_digikala_price(product_name):
     try:
         async with aiohttp.ClientSession() as session:
-            # API غیررسمی دیجی‌کالا
             url = f"https://api.digikala.com/v1/search/?q={product_name}"
             async with session.get(url) as resp:
                 if resp.status == 200:
@@ -351,7 +367,6 @@ async def get_torob_price(product_name):
         return "🔴 خطا در دریافت قیمت"
 
 async def get_ai_response(product_name):
-    # پاسخ‌های هوشمند رایگان (با منطق ساده)
     responses = {
         "گوشی": "محصولات گوشی همراه با گارانتی ۱۸ ماهه و بهترین قیمت بازار.",
         "هدفون": "هدفون‌های با کیفیت بالا با صدای بی‌نظیر و مناسب برای استفاده روزمره.",

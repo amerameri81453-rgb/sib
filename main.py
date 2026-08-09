@@ -12,6 +12,7 @@ from apscheduler.triggers.date import DateTrigger
 import aiohttp
 import pytz
 import jdatetime
+import google.generativeai as genai
 
 # ============== تنظیمات ==============
 API_ID = 29811798
@@ -19,6 +20,11 @@ API_HASH = "ef5847a43a978d6883b97b0caeb81736"
 BOT_TOKEN = "8874696899:AAE4xqezJFuTJjwLuWmsME09RN4lCUQOfCw"
 CHANNEL_ID = -1004316990533
 ADMIN_IDS = [7803165903, 8010044260]
+
+# ============== تنظیمات هوش مصنوعی Gemini ==============
+GEMINI_API_KEY = "AQ.Ab8RN6KlGHD461tiz4JeVc_3fUabxd0x_qo_WjNWTji-zPaMjA"
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 # ============== راه‌اندازی ==============
 logging.basicConfig(level=logging.INFO)
@@ -75,17 +81,11 @@ def parse_persian_date(text):
     now = datetime.now(pytz.timezone('Asia/Tehran'))
     text = text.strip()
     
-    # الگوهای مختلف برای تاریخ شمسی
     patterns = [
-        # امروز، فردا، پس‌فردا
         (r'امروز\s*(\d{1,2}):(\d{2})', lambda m: now.replace(hour=int(m[0]), minute=int(m[1]), second=0)),
         (r'فردا\s*(\d{1,2}):(\d{2})', lambda m: (now + timedelta(days=1)).replace(hour=int(m[0]), minute=int(m[1]), second=0)),
         (r'پس فردا\s*(\d{1,2}):(\d{2})', lambda m: (now + timedelta(days=2)).replace(hour=int(m[0]), minute=int(m[1]), second=0)),
-        
-        # تاریخ شمسی کامل: 1402/12/20 18:00
         (r'(\d{4})/(\d{1,2})/(\d{1,2})\s*(\d{1,2}):(\d{2})', lambda m: convert_jalali_to_gregorian(int(m[0]), int(m[1]), int(m[2]), int(m[3]), int(m[4]))),
-        
-        # فقط زمان: 14:30 (همین امروز)
         (r'(\d{1,2}):(\d{2})', lambda m: now.replace(hour=int(m[0]), minute=int(m[1]), second=0)),
     ]
     
@@ -96,7 +96,6 @@ def parse_persian_date(text):
     return None
 
 def convert_jalali_to_gregorian(year, month, day, hour, minute):
-    """تبدیل تاریخ شمسی به میلادی"""
     try:
         jd = jdatetime.date(year, month, day)
         gd = jd.togregorian()
@@ -117,12 +116,13 @@ async def start_command(client, message: Message):
     
     await message.reply_text(
         "🍎 **به ربات هوشمند سیب‌شاپ خوش اومدی!**\n\n"
-        "من یک هوش مصنوعی پیشرفته هستم که مخصوص کانال سیب‌شاپ طراحی شدم.\n\n"
+        "من یک هوش مصنوعی پیشرفته با **Google Gemini** هستم!\n"
+        "مخصوص کانال سیب‌شاپ طراحی شدم.\n\n"
         "✨ **قابلیت‌های من:**\n"
-        "• 📝 ثبت پست با هر نوع رسانه (عکس، فیلم، گیف، استیکر، فایل)\n"
-        "• 🧠 پاسخ به هر سوالی با هوش مصنوعی پیشرفته\n"
+        "• 📝 ثبت پست با هر نوع رسانه\n"
+        "• 🧠 هوش مصنوعی واقعی برای پاسخ به هر سوالی\n"
         "• 💰 استعلام قیمت از دیجی‌کالا و ترب\n"
-        "• 📊 مدیریت کامل پست‌های کانال\n\n"
+        "• 📊 مدیریت کامل پست‌ها\n\n"
         "از منوی زیر انتخاب کن:",
         reply_markup=main_menu()
     )
@@ -195,7 +195,6 @@ async def handle_text_messages(client, message: Message):
             )
             return
         
-        # ذخیره در دیتابیس
         data = load_data()
         post_id = len(data["scheduled"]) + 1
         post_data = {
@@ -208,7 +207,6 @@ async def handle_text_messages(client, message: Message):
         data["scheduled"].append(post_data)
         save_data(data)
         
-        # برنامه‌ریزی برای ارسال
         scheduler.add_job(
             send_scheduled_post,
             DateTrigger(run_date=scheduled_time),
@@ -246,21 +244,45 @@ async def handle_text_messages(client, message: Message):
         del user_data[user_id]
         return
     
-    # مرحله 4: هوش مصنوعی
+    # مرحله 4: هوش مصنوعی Gemini
     if user_id in user_data and user_data[user_id].get("step") == "waiting_ai_question":
         question = message.text
-        await message.reply_text("🧠 در حال پردازش... لطفاً چند ثانیه صبر کن.")
         
-        response = await get_ai_response(question)
+        loading_msg = await message.reply_text("🧠 در حال فکر کردن با Gemini... لطفاً چند ثانیه صبر کن.")
         
-        await message.reply_text(
-            f"🧠 **پاسخ هوش مصنوعی سیب‌شاپ:**\n\n"
-            f"{response}\n\n"
-            f"❓ سوال دیگه‌ای داری؟ بپرس!",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back")]
-            ])
-        )
+        try:
+            prompt = f"""تو یک دستیار هوشمند و حرفه‌ای برای **کانال سیب‌شاپ** هستی.
+            به سوال کاربر به فارسی پاسخ بده.
+            پاسخ باید مفید، دقیق، دوستانه و کامل باشه.
+            
+            سوال کاربر: {question}
+            
+            پاسخ:"""
+            
+            response = model.generate_content(prompt)
+            ai_response = response.text
+            
+            await loading_msg.delete()
+            
+            await message.reply_text(
+                f"🧠 **پاسخ هوش مصنوعی سیب‌شاپ (Gemini):**\n\n"
+                f"{ai_response}\n\n"
+                f"❓ سوال دیگه‌ای داری؟ بپرس!",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back")]
+                ])
+            )
+            
+        except Exception as e:
+            await loading_msg.delete()
+            await message.reply_text(
+                f"❌ خطا در ارتباط با هوش مصنوعی Gemini: {str(e)}\n"
+                f"لطفاً دوباره تلاش کن.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔙 بازگشت", callback_data="back")]
+                ])
+            )
+        
         del user_data[user_id]
         return
     
@@ -290,9 +312,7 @@ async def handle_media_messages(client, message: Message):
     if not is_admin(user_id):
         return
     
-    # مرحله 1: دریافت محتوای پست
     if user_id in user_data and user_data[user_id].get("step") == "waiting_post_content":
-        # تشخیص نوع رسانه
         if message.photo:
             content = {"type": "photo", "file_id": message.photo.file_id, "caption": message.caption or ""}
         elif message.video:
@@ -324,7 +344,6 @@ async def handle_media_messages(client, message: Message):
         )
         return
     
-    # مرحله ویرایش
     if user_id in user_data and user_data[user_id].get("step") == "waiting_edit_content":
         post_id = user_data[user_id]["edit_post_id"]
         
@@ -534,7 +553,7 @@ async def confirm_delete(client, callback: CallbackQuery):
         reply_markup=manage_posts_menu()
     )
 
-# ============== هوش مصنوعی پیشرفته سیب‌شاپ ==============
+# ============== هوش مصنوعی Gemini ==============
 @app.on_callback_query(filters.regex("ai_chat"))
 async def ai_chat(client, callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
@@ -542,292 +561,18 @@ async def ai_chat(client, callback: CallbackQuery):
         return
     
     await callback.message.edit_text(
-        "🧠 **هوش مصنوعی سیب‌شاپ**\n\n"
-        "من یک هوش مصنوعی پیشرفته هستم که به تمام سوالاتت پاسخ میدم.\n\n"
-        "❓ هر سوالی داری بپرس:\n"
-        "• درباره محصولات اپل\n"
-        "• مقایسه و راهنمای خرید\n"
-        "• مشخصات فنی\n"
-        "• قیمت‌ها و تخفیف‌ها\n"
-        "• گارانتی و خدمات\n"
-        "• هر سوال دیگه‌ای\n\n"
-        "سوال خودت رو بفرست:",
+        "🧠 **هوش مصنوعی سیب‌شاپ (Gemini)**\n\n"
+        "من یک هوش مصنوعی واقعی هستم که با **Google Gemini** تقویت شدم!\n"
+        "میتونی هر سوالی بپرسی:\n"
+        "• درباره محصولات اپل 🍎\n"
+        "• مقایسه و راهنمای خرید 📱\n"
+        "• هر سوال دیگه‌ای 🤔\n\n"
+        "❓ سوال خودت رو بفرست:",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 بازگشت", callback_data="back")]
         ])
     )
     user_data[callback.from_user.id] = {"step": "waiting_ai_question"}
-
-async def get_ai_response(question):
-    """هوش مصنوعی پیشرفته با دیتابیس دانش کامل"""
-    question_lower = question.lower()
-    
-    # ==================== دیتابیس دانش سیب‌شاپ ====================
-    
-    # 1. اطلاعات گوشی‌ها
-    if any(word in question_lower for word in ["گوشی", "آیفون", "iphone", "موبایل", "مبایل", "۱۶", "۱۵", "۱۴", "۱۳"]):
-        if "۱۶" in question_lower or "16" in question_lower:
-            if "پرو" in question_lower or "max" in question_lower:
-                return """📱 **آیفون ۱۶ پرو مکس**
-
-🔹 **مشخصات فنی:**
-• صفحه‌نمایش: ۶.۹ اینچ Super Retina XDR
-• تراشه: A18 Pro با ۶ هسته
-• دوربین اصلی: ۴۸ مگاپیکسل با تثبیت‌کننده اپتیکال
-• دوربین تله‌فوتو: ۱۲ مگاپیکسل با زوم ۵ برابر
-• باتری: ۴۶۸۵ میلی‌آمپر
-• حافظه: ۲۵۶/۵۱۲/۱۰۲۴ گیگابایت
-
-💰 **قیمت:** حدود ۶۰ تا ۷۰ میلیون تومان
-
-💡 **نکته:** بهترین گوشی اپل برای عکاسی و فیلمبرداری حرفه‌ای"""
-            
-            elif "پرو" in question_lower:
-                return """📱 **آیفون ۱۶ پرو**
-
-🔹 **مشخصات فنی:**
-• صفحه‌نمایش: ۶.۳ اینچ Super Retina XDR
-• تراشه: A18 Pro با ۶ هسته
-• دوربین اصلی: ۴۸ مگاپیکسل
-• دوربین تله‌فوتو: ۱۲ مگاپیکسل با زوم ۳ برابر
-• باتری: ۳۵۸۲ میلی‌آمپر
-• حافظه: ۱۲۸/۲۵۶/۵۱۲ گیگابایت
-
-💰 **قیمت:** حدود ۵۰ تا ۶۰ میلیون تومان
-
-💡 **نکته:** تعادل عالی بین قدرت و اندازه مناسب"""
-            
-            else:
-                return """📱 **آیفون ۱۶**
-
-🔹 **مشخصات فنی:**
-• صفحه‌نمایش: ۶.۱ اینچ Super Retina XDR
-• تراشه: A18 با ۶ هسته
-• دوربین اصلی: ۴۸ مگاپیکسل
-• باتری: ۳۵۶۱ میلی‌آمپر
-• حافظه: ۱۲۸/۲۵۶ گیگابایت
-
-💰 **قیمت:** حدود ۴۰ تا ۵۰ میلیون تومان
-
-💡 **نکته:** گزینه اقتصادی با کیفیت عالی"""
-        
-        if "۱۵" in question_lower or "15" in question_lower:
-            return """📱 **آیفون ۱۵ پرو مکس**
-
-🔹 **مشخصات فنی:**
-• صفحه‌نمایش: ۶.۷ اینچ Super Retina XDR
-• تراشه: A17 Pro با ۶ هسته
-• دوربین اصلی: ۴۸ مگاپیکسل
-• درگاه: USB-C
-• وزن: ۲۲۱ گرم
-
-💰 **قیمت:** حدود ۴۵ تا ۵۵ میلیون تومان
-
-💡 **نکته:** همچنان یک گزینه عالی با قیمت مناسب‌تر"""
-    
-    # 2. اطلاعات ایرپاد
-    if any(word in question_lower for word in ["ایرپاد", "airpods", "هدفون", "هندزفری", "بیسیم"]):
-        if "پرو" in question_lower or "pro" in question_lower:
-            return """🎧 **ایرپاد پرو ۲**
-
-🔹 **مشخصات فنی:**
-• حذف نویز فعال (ANC)
-• کیفیت صدای بی‌نظیر
-• باتری تا ۶ ساعت
-• شارژدهی با کیس تا ۳۰ ساعت
-• مقاوم در برابر آب و عرق (IPX4)
-
-💰 **قیمت:** حدود ۱۵ تا ۲۰ میلیون تومان
-
-💡 **نکته:** بهترین انتخاب برای استفاده روزمره و کیفیت صدای عالی"""
-        
-        else:
-            return """🎧 **ایرپاد ۴**
-
-🔹 **مشخصات فنی:**
-• کیفیت صدای عالی
-• باتری تا ۵ ساعت
-• شارژدهی با کیس تا ۲۰ ساعت
-• طراحی ارگونومیک
-
-💰 **قیمت:** حدود ۱۰ تا ۱۵ میلیون تومان
-
-💡 **نکته:** گزینه اقتصادی با کیفیت مناسب"""
-    
-    # 3. اطلاعات ساعت
-    if any(word in question_lower for word in ["ساعت", "واچ", "watch", "اپل واچ"]):
-        if "الترا" in question_lower or "ultra" in question_lower:
-            return """⌚ **اپل واچ اولترا ۲**
-
-🔹 **مشخصات فنی:**
-• صفحه‌نمایش ۴۹ میلی‌متری
-• مقاوم در برابر آب تا ۱۰۰ متر
-• GPS + Cellular
-• سنسور ضربان قلب و اکسیژن خون
-• مناسب برای ورزش‌های حرفه‌ای
-
-💰 **قیمت:** حدود ۳۰ تا ۳۵ میلیون تومان
-
-💡 **نکته:** بهترین برای کوهنوردی و ورزش‌های شدید"""
-        
-        else:
-            return """⌚ **اپل واچ سری ۹**
-
-🔹 **مشخصات فنی:**
-• صفحه‌نمایش ۴۵ میلی‌متری
-• سنسور ضربان قلب
-• سنسور اکسیژن خون
-• ردیابی خواب
-• GPS
-
-💰 **قیمت:** حدود ۱۵ تا ۲۰ میلیون تومان
-
-💡 **نکته:** بهترین برای استفاده روزمره"""
-    
-    # 4. اطلاعات تبلت
-    if any(word in question_lower for word in ["تبلت", "آیپد", "ipad", "پد"]):
-        return """📱 **آیپد پرو M4**
-
-🔹 **مشخصات فنی:**
-• صفحه‌نمایش ۱۳ اینچ OLED
-• تراشه M4
-• پشتیبانی از قلم اپل پرو
-• تا ۱۰۰۰ نیت روشنایی
-
-💰 **قیمت:** حدود ۴۰ تا ۵۰ میلیون تومان
-
-💡 **نکته:** بهترین تبلت برای طراحان و حرفه‌ای‌ها"""
-    
-    # 5. اطلاعات مک
-    if any(word in question_lower for word in ["مک", "مک بوک", "macbook", "ایمک", "لپ تاپ"]):
-        if "پرو" in question_lower or "pro" in question_lower:
-            return """💻 **مک‌بوک پرو M3**
-
-🔹 **مشخصات فنی:**
-• پردازنده M3 Pro
-• صفحه‌نمایش ۱۴.۲ اینچ
-• حافظه ۱۸ گیگابایت
-• SSD 512 گیگابایت
-• باتری تا ۲۲ ساعت
-
-💰 **قیمت:** حدود ۸۰ تا ۱۰۰ میلیون تومان
-
-💡 **نکته:** بهترین برای برنامه‌نویسی و تدوین"""
-        
-        else:
-            return """💻 **مک‌بوک ایر M3**
-
-🔹 **مشخصات فنی:**
-• پردازنده M3
-• صفحه‌نمایش ۱۳.۶ اینچ
-• حافظه ۱۶ گیگابایت
-• SSD 256 گیگابایت
-• وزن ۱.۲۴ کیلوگرم
-
-💰 **قیمت:** حدود ۶۰ تا ۷۰ میلیون تومان
-
-💡 **نکته:** سبک و مناسب برای استفاده روزمره"""
-    
-    # 6. اطلاعات شارژر و کابل
-    if any(word in question_lower for word in ["شارژر", "کابل", "اداپتور", "پاوربانک"]):
-        return """🔋 **شارژر و کابل اصلی اپل**
-
-🔹 **شارژر ۲۰ وات:** 
-• مناسب برای آیفون و آیپد
-• قیمت: ۲ تا ۳ میلیون تومان
-
-🔹 **شارژر ۳۰ وات:**
-• مناسب برای مک‌بوک و آیپد پرو
-• قیمت: ۳ تا ۴ میلیون تومان
-
-🔹 **کابل USB-C به لایتنینگ:**
-• اصلی و با کیفیت
-• قیمت: ۱ تا ۲ میلیون تومان
-
-💡 **نکته:** حتماً از محصولات اصلی استفاده کن تا به باتری آسیب نرسه."""
-    
-    # 7. اطلاعات کیس و محافظ
-    if any(word in question_lower for word in ["کیس", "قاب", "محافظ", "گلس"]):
-        return """🛡️ **محافظ‌های اصلی اپل**
-
-🔹 **کیس سیلیکونی اصلی:**
-• نرم و ضد ضربه
-• قیمت: ۱ تا ۲ میلیون تومان
-
-🔹 **کیس شفاف:**
-• نمایش زیبایی گوشی
-• قیمت: ۱ تا ۱.۵ میلیون تومان
-
-🔹 **گلس ضدخش اصلی:**
-• محافظت کامل از صفحه
-• قیمت: ۵۰۰ هزار تا ۱ میلیون تومان
-
-💡 **نکته:** کیس سیلیکونی برای محافظت بیشتر پیشنهاد میشه."""
-    
-    # 8. سوالات متداول
-    if any(word in question_lower for word in ["گارانتی", "ضمانت"]):
-        return """✅ **گارانتی محصولات سیب‌شاپ**
-
-🔹 **گارانتی ۱۸ ماهه:**
-• تمام محصولات اصلی
-• تعویض در صورت نقص فنی
-• پشتیبانی کامل
-
-🔹 **گارانتی ۱۲ ماهه:**
-• محصولات جانبی
-• شارژرها و کابل‌ها
-
-📞 **برای ثبت گارانتی:** با پشتیبانی تماس بگیرید.
-💡 **نکته:** حتماً فاکتور خرید رو نگه دارید."""
-    
-    if any(word in question_lower for word in ["ارسال", "تحویل", "پست"]):
-        return """📦 **روش‌های ارسال سیب‌شاپ**
-
-🔹 **ارسال رایگان:**
-• برای خریدهای بالای ۵ میلیون تومان
-• زمان تحویل: ۲ تا ۳ روز کاری
-
-🔹 **ارسال اکسپرس:**
-• تحویل ۲۴ ساعته
-• هزینه: ۲۰۰ هزار تومان
-
-🔹 **تحویل حضوری:**
-• در محل فروشگاه
-• هماهنگی قبلی
-
-📞 **برای پیگیری سفارش:** با پشتیبانی تماس بگیرید."""
-    
-    if any(word in question_lower for word in ["قیمت", "هزینه", "چنده", "چقدر"]):
-        return """💰 **راهنمای قیمت محصولات سیب‌شاپ**
-
-📱 **آیفون ۱۶ پرو مکس:** ۶۰-۷۰ میلیون
-📱 **آیفون ۱۶ پرو:** ۵۰-۶۰ میلیون
-📱 **آیفون ۱۶:** ۴۰-۵۰ میلیون
-🎧 **ایرپاد پرو ۲:** ۱۵-۲۰ میلیون
-⌚ **اپل واچ سری ۹:** ۱۵-۲۰ میلیون
-💻 **مک‌بوک پرو M3:** ۸۰-۱۰۰ میلیون
-
-📌 **نکته:** قیمت‌ها ممکنه تغییر کنن. برای قیمت دقیق با ما تماس بگیرید."""
-    
-    # پاسخ پیش‌فرض هوش مصنوعی
-    return """🍎 **سیب‌شاپ - پاسخ هوش مصنوعی**
-
-سوال شما در دیتابیس من موجود نیست، ولی خوشحال میشم کمکت کنم!
-
-📌 **سوالات رایج:**
-• مقایسه آیفون ۱۶ و ۱۶ پرو
-• قیمت ایرپاد پرو ۲
-• گارانتی محصولات
-• روش خرید و ارسال
-• مشخصات فنی محصولات
-
-📞 **تماس با ما:** @AppleShopChannel
-💬 **پشتیبانی:** ۲۴ ساعته
-
-سوال خودت رو دقیق‌تر بپرس تا بهتر راهنماییت کنم!
-
-💡 **راهنما:** میتونی از این کلیدواژه‌ها استفاده کنی:
-"گوشی"، "ایرپاد"، "ساعت"، "تبلت"، "مک"، "شارژر"، "گارانتی"، "قیمت" """
 
 # ============== استعلام قیمت ==============
 @app.on_callback_query(filters.regex("price_check"))
@@ -932,8 +677,8 @@ async def help_command(client, callback: CallbackQuery):
 • **ویرایش پست:** تغییر محتوای پست‌های در انتظار
 • **حذف پست:** حذف پست‌های در انتظار
 
-**🧠 هوش مصنوعی:**
-هر سوالی داری بپرس! من به همه چیز جواب میدم.
+**🧠 هوش مصنوعی Gemini:**
+هر سوالی داری بپرس! من با Google Gemini بهت پاسخ میدم.
 
 **💰 استعلام قیمت:**
 اسم محصول رو بفرست تا قیمت از دیجی‌کالا و ترب بگیرم
@@ -965,7 +710,7 @@ async def back(client, callback: CallbackQuery):
 
 # ============== ران کردن ربات ==============
 if __name__ == "__main__":
-    print("🍎 ربات هوشمند سیب‌شاپ در حال اجرا...")
+    print("🍎 ربات هوشمند سیب‌شاپ با Gemini در حال اجرا...")
     print(f"👥 فقط کاربران با آیدی {ADMIN_IDS} دسترسی دارند.")
     scheduler.start()
     app.run()

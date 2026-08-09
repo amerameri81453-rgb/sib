@@ -20,9 +20,8 @@ BOT_TOKEN = "8874696899:AAE4xqezJFuTJjwLuWmsME09RN4lCUQOfCw"
 CHANNEL_ID = -1004316990533
 ADMIN_IDS = [7803165903, 8010044260]
 
-# ============== تنظیمات Hugging Face ==============
-HF_TOKEN = "hf_xxxxxxx"  # ← کلیدت رو اینجا بذار
-HF_MODEL = "mistralai/Mistral-7B-Instruct-v0.3"  # مدل رایگان و قوی
+# ============== تنظیمات OpenRouter ==============
+OPENROUTER_API_KEY = "sk-or-v1-777...578"  # ← کلید کاملت رو اینجا بذار
 
 # ============== راه‌اندازی ==============
 logging.basicConfig(level=logging.INFO)
@@ -105,56 +104,52 @@ def convert_jalali_to_gregorian(year, month, day, hour, minute):
 def is_admin(user_id):
     return user_id in ADMIN_IDS
 
-# ============== هوش مصنوعی Hugging Face ==============
-async def get_huggingface_response(question):
-    """ارسال سوال به Hugging Face و دریافت پاسخ"""
+# ============== هوش مصنوعی OpenRouter ==============
+async def get_ai_response(question):
+    """ارسال سوال به OpenRouter و دریافت پاسخ"""
     try:
         async with aiohttp.ClientSession() as session:
-            # API Inference برای مدل‌های رایگان
-            url = f"https://api-inference.huggingface.co/models/{HF_MODEL}"
+            url = "https://openrouter.ai/api/v1/chat/completions"
             
             headers = {
-                "Authorization": f"Bearer {HF_TOKEN}",
-                "Content-Type": "application/json"
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://t.me/sib_bot",
+                "X-Title": "سیب‌شاپ"
             }
             
-            # ساخت پرامپت مخصوص سیب‌شاپ
-            prompt = f"""<s>[INST] 
-            تو یک دستیار هوشمند و حرفه‌ای برای کانال سیب‌شاپ هستی.
-            به سوال کاربر به فارسی پاسخ بده.
-            پاسخ باید مفید، دقیق، دوستانه و کامل باشه.
-            
-            سوال کاربر: {question}
-            
-            پاسخ: [/INST]"""
-            
             payload = {
-                "inputs": prompt,
-                "parameters": {
-                    "max_new_tokens": 500,
-                    "temperature": 0.7,
-                    "return_full_text": False
-                }
+                "model": "meta-llama/llama-3.3-70b-instruct:free",  # مدل قوی و رایگان
+                "messages": [
+                    {
+                        "role": "system", 
+                        "content": """تو یک دستیار هوشمند و حرفه‌ای برای کانال سیب‌شاپ هستی.
+                        به سوال کاربر به فارسی پاسخ بده.
+                        پاسخ باید مفید، دقیق، دوستانه و کامل باشه.
+                        اگر درباره محصولات اپل سوال شد، اطلاعات دقیق بدی.
+                        اگر قیمت خواست، قیمت‌های تقریبی رو بگی.
+                        اگر گارانتی خواست، گارانتی ۱۸ ماهه رو توضیح بدی."""
+                    },
+                    {"role": "user", "content": question}
+                ],
+                "temperature": 0.7,
+                "max_tokens": 800,
+                "top_p": 0.9
             }
             
             async with session.post(url, headers=headers, json=payload, timeout=30) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    if isinstance(data, list) and len(data) > 0:
-                        return data[0].get("generated_text", "خطا در تولید پاسخ")
-                    elif isinstance(data, dict):
-                        return data.get("generated_text", "خطا در تولید پاسخ")
-                    return "خطا در دریافت پاسخ"
-                elif resp.status == 503:
-                    # مدل در حال بارگذاری است
-                    return "⏳ مدل در حال آماده‌سازی است. لطفاً ۳۰ ثانیه بعد دوباره تلاش کن."
+                    return data["choices"][0]["message"]["content"]
+                elif resp.status == 429:
+                    return "⚠️ محدودیت درخواست روزانه پر شده. لطفاً فردا دوباره تلاش کن."
                 else:
                     error_text = await resp.text()
-                    return f"❌ خطا: {error_text}"
+                    return f"❌ خطا: {error_text[:200]}"
     except asyncio.TimeoutError:
         return "⏳ زمان پاسخ‌دهی به پایان رسید. لطفاً دوباره تلاش کن."
     except Exception as e:
-        return f"❌ خطا در ارتباط با هوش مصنوعی: {str(e)}"
+        return f"❌ خطا: {str(e)}"
 
 # ============== دستور استارت ==============
 @app.on_message(filters.command("start"))
@@ -165,7 +160,7 @@ async def start_command(client, message: Message):
     
     await message.reply_text(
         "🍎 **به ربات هوشمند سیب‌شاپ خوش اومدی!**\n\n"
-        "من یک هوش مصنوعی پیشرفته با **Hugging Face** هستم!\n"
+        "من یک هوش مصنوعی پیشرفته با **Llama 3.3** از OpenRouter هستم!\n"
         "مخصوص کانال سیب‌شاپ طراحی شدم.\n\n"
         "✨ **قابلیت‌های من:**\n"
         "• 📝 ثبت پست با هر نوع رسانه\n"
@@ -293,19 +288,19 @@ async def handle_text_messages(client, message: Message):
         del user_data[user_id]
         return
     
-    # مرحله 4: هوش مصنوعی Hugging Face
+    # مرحله 4: هوش مصنوعی OpenRouter
     if user_id in user_data and user_data[user_id].get("step") == "waiting_ai_question":
         question = message.text
         
-        loading_msg = await message.reply_text("🧠 در حال فکر کردن با Hugging Face... لطفاً چند ثانیه صبر کن.")
+        loading_msg = await message.reply_text("🧠 در حال فکر کردن با Llama 3.3... لطفاً چند ثانیه صبر کن.")
         
         try:
-            ai_response = await get_huggingface_response(question)
+            ai_response = await get_ai_response(question)
             
             await loading_msg.delete()
             
             await message.reply_text(
-                f"🧠 **پاسخ هوش مصنوعی سیب‌شاپ (Hugging Face):**\n\n"
+                f"🧠 **پاسخ هوش مصنوعی سیب‌شاپ (Llama 3.3):**\n\n"
                 f"{ai_response}\n\n"
                 f"❓ سوال دیگه‌ای داری؟ بپرس!",
                 reply_markup=InlineKeyboardMarkup([
@@ -593,7 +588,7 @@ async def confirm_delete(client, callback: CallbackQuery):
         reply_markup=manage_posts_menu()
     )
 
-# ============== هوش مصنوعی Hugging Face ==============
+# ============== هوش مصنوعی OpenRouter ==============
 @app.on_callback_query(filters.regex("ai_chat"))
 async def ai_chat(client, callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
@@ -601,8 +596,8 @@ async def ai_chat(client, callback: CallbackQuery):
         return
     
     await callback.message.edit_text(
-        "🧠 **هوش مصنوعی سیب‌شاپ (Hugging Face)**\n\n"
-        "من یک هوش مصنوعی واقعی با مدل **Mistral 7B** از Hugging Face هستم!\n"
+        "🧠 **هوش مصنوعی سیب‌شاپ (Llama 3.3)**\n\n"
+        "من یک هوش مصنوعی واقعی با مدل **Llama 3.3 70B** از OpenRouter هستم!\n"
         "میتونی هر سوالی بپرسی:\n"
         "• درباره محصولات اپل 🍎\n"
         "• مقایسه و راهنمای خرید 📱\n"
@@ -717,8 +712,8 @@ async def help_command(client, callback: CallbackQuery):
 • **ویرایش پست:** تغییر محتوای پست‌های در انتظار
 • **حذف پست:** حذف پست‌های در انتظار
 
-**🧠 هوش مصنوعی Hugging Face:**
-هر سوالی داری بپرس! من با مدل Mistral 7B بهت پاسخ میدم.
+**🧠 هوش مصنوعی Llama 3.3:**
+هر سوالی داری بپرس! من با مدل Llama 3.3 70B بهت پاسخ میدم.
 
 **💰 استعلام قیمت:**
 اسم محصول رو بفرست تا قیمت از دیجی‌کالا و ترب بگیرم
@@ -750,7 +745,7 @@ async def back(client, callback: CallbackQuery):
 
 # ============== ران کردن ربات ==============
 if __name__ == "__main__":
-    print("🍎 ربات هوشمند سیب‌شاپ با Hugging Face در حال اجرا...")
+    print("🍎 ربات هوشمند سیب‌شاپ با Llama 3.3 در حال اجرا...")
     print(f"👥 فقط کاربران با آیدی {ADMIN_IDS} دسترسی دارند.")
     scheduler.start()
     app.run()

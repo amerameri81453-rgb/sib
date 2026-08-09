@@ -12,12 +12,12 @@ from apscheduler.triggers.date import DateTrigger
 import aiohttp
 import pytz
 
-# ============== تنظیمات ==============
-API_ID = 123456  # از my.telegram.org بگیر
-API_HASH = "your_api_hash"  # از my.telegram.org بگیر
+# ============== تنظیمات نهایی ==============
+API_ID = 29811798
+API_HASH = "ef5847a43a978d6883b97b0caeb81736"
 BOT_TOKEN = "8874696899:AAE4xqezJFuTJjwLuWmsME09RN4lCUQOfCw"
-CHANNEL_ID = -1004316990533  # آیدی عددی کانال شما
-ADMIN_IDS = [7803165903, 8010044260]  # فقط این دو نفر دسترسی دارن
+CHANNEL_ID = -1004316990533
+ADMIN_IDS = [7803165903, 8010044260]
 
 # ============== راه‌اندازی ==============
 logging.basicConfig(level=logging.INFO)
